@@ -1,7 +1,10 @@
 package service
 
 import (
+	"context"
+	"crypto/tls"
 	"encoding/json"
+	"fmt"
 	"io/ioutil"
 	"log"
 	"net/http"
@@ -10,6 +13,7 @@ import (
 	"github.com/gorilla/mux"
 	"github.com/itchyny/gojq"
 	"github.com/rs/cors"
+	"golang.org/x/crypto/acme/autocert"
 )
 
 type Database interface {
@@ -29,9 +33,11 @@ const (
 )
 
 type Server struct {
-	Address string
-	router  *mux.Router
-	db      Database
+	Address      string
+	IsProduction bool
+	Domain       string
+	router       *mux.Router
+	db           Database
 }
 
 func (s *Server) Init(db Database) {
@@ -57,6 +63,28 @@ func (s *Server) Init(db Database) {
 		ReadTimeout:  15 * time.Second,
 	}
 
+	if s.IsProduction {
+		hostPolicy := func(ctx context.Context, host string) error {
+			allowedHost := s.Domain
+			if host == allowedHost {
+				return nil
+			}
+			return fmt.Errorf("acme/autocert: only %s host is allowed", allowedHost)
+		}
+
+		dataDir := "."
+		m := &autocert.Manager{
+			Prompt:     autocert.AcceptTOS,
+			HostPolicy: hostPolicy,
+			Cache:      autocert.DirCache(dataDir),
+		}
+
+		srv.Addr = ":8443"
+		srv.TLSConfig = &tls.Config{GetCertificate: m.GetCertificate}
+		log.Println("caffeine server started at " + srv.Addr)
+		log.Fatal(srv.ListenAndServeTLS("", ""))
+	}
+	log.Println("caffeine server started at " + srv.Addr)
 	log.Fatal(srv.ListenAndServe())
 }
 
